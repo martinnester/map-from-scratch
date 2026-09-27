@@ -2,7 +2,10 @@
 import {View} from './view.js'
 
 import { Rectangle, Vec2d } from "./geometry.js";
-import { GOOGLE_MAPS_API_KEY } from './env.js';
+const GOOGLE_MAPS_API_KEY = localStorage.getItem('api-key') ?? prompt('enter google maps api key');
+if(GOOGLE_MAPS_API_KEY) {
+    localStorage.setItem('api-key', GOOGLE_MAPS_API_KEY);
+}
 
 // const root = /** @type {HTMLDivElement} */ (document.getElementById('root'));
 
