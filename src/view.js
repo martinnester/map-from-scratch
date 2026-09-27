@@ -197,7 +197,6 @@ export class View {
       this.#mouseDown = false;
     });
     this.#root.addEventListener("wheel", (e) => {
-
       e.preventDefault();
       const { x, y } = root.getBoundingClientRect();
       this.#mousePos.x = e.x - x;
@@ -212,7 +211,7 @@ export class View {
         this.#pan.x -= e.shiftKey ? e.deltaY : e.deltaX;
         this.#pan.y -= e.shiftKey ? 0 : e.deltaY;
       }
-                  if(this.#zoom < 1 ){
+      if (this.#zoom < 1) {
         this.#zoom = 1;
         return;
       }
@@ -284,7 +283,7 @@ export class View {
             () => this.#mouseDown,
           ),
           this.#pan,
-          this.#zoom
+          this.#zoom,
         );
         this.#ctx.restore();
       });
