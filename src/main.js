@@ -8,8 +8,6 @@ if (GOOGLE_MAPS_API_KEY) {
   localStorage.setItem("api-key", GOOGLE_MAPS_API_KEY);
 }
 
-// const root = /** @type {HTMLDivElement} */ (document.getElementById('root'));
-
 /** @typedef {{session: string, expiry: string, tileWidth: number, imageFormat: "jpeg" | string, tileHeight:number}} TileSession */
 const view = new View(
   /** @type {HTMLDivElement} */ (document.getElementById("root")),
@@ -19,56 +17,72 @@ const view = new View(
  * @implements {ViewElement}
  */
 class Map {
-  #TILE_SIZE = 500;
-  #BLANK = new Image();
-  #OFFSETS = [
-    new Vec2d(0, 0),
-    new Vec2d(1, 0),
-    new Vec2d(1, 1),
-    new Vec2d(0, 1),
-    new Vec2d(-1, 1),
-    new Vec2d(-1, 0),
-    new Vec2d(-1, -1),
-    new Vec2d(0, -1),
-    new Vec2d(1, -1),
-  ];
   controls = /** @type {ViewControl<any>[]} */ ([]);
   name = "Map";
-  /** @readonly @type {Record<string, HTMLImageElement | null>} */ #images;
   /** @type {Vec2d | null} */ #mapPan = null;
   /** @type {number | null} */ #mapZoom = null;
+  /** @type {Record<string, HTMLImageElement>} */ #imageCache = {};
+  /** @type {OffscreenCanvas} */ #offscreenCanvas = new OffscreenCanvas(1, 1);
+  /** @type {Vec2d} */ #offscreenCanvasPosition = new Vec2d(0, 0);
+  boundingRectangle = new Rectangle(new Vec2d(0, 0), new Vec2d(1000, 1000));
+  /** @type {Rectangle} */ #target = this.boundingRectangle;
   /** @type {TileSession} */ #session;
+  /** @type {Vec2d}  */ #sessionTileSize;
   /**
    * @param {TileSession} session
    */
   constructor(session) {
     this.#session = session;
-    this.#images = {};
+    this.#sessionTileSize = new Vec2d(session.tileWidth, session.tileHeight);
   }
-  #updateTiles() {
-    for (const [key, pos] of this.#tileKeys()) {
-      console.log(key);
-      if (!(key in this.#images)) {
-        const image = new Image();
-        image.src = `https://tile.googleapis.com/v1/2dtiles/${key}?session=${this.#session.session}&key=${GOOGLE_MAPS_API_KEY}`;
-        console.log(image);
-        this.#images[key] = image;
-      }
+  /**
+   * @param {Vec2d} position
+   * @param {number} zoom
+   * @returns {HTMLImageElement | null}
+   */
+  #getTileSync(position, zoom) {
+    const key = `${zoom}/${position.x}/${position.y}`;
+    if (key in this.#imageCache) {
+      return this.#imageCache[key] ?? null;
+    } else {
+      const image = new Image();
+      image.src = `https://tile.googleapis.com/v1/2dtiles/${key}?session=${this.#session.session}&key=${GOOGLE_MAPS_API_KEY}`;
+      image.addEventListener(
+        "load",
+        () => {
+          this.#imageCache[key] = image;
+        },
+        { once: true },
+      );
+      image.addEventListener("error", () => {
+        this.#imageCache[key] = image;
+      });
+      return null;
     }
   }
-  *#tileKeys() {
-    for (const offset of this.#OFFSETS) {
-      if (this.#mapPan !== null && this.#mapZoom !== null) {
-        const pos = this.#mapPan.add(offset);
-        const size = Math.pow(2, this.#mapZoom);
-        if (pos.bounded(new Vec2d(size, size))) {
-          yield /** @type {[string,Vec2d]} */ ([
-            `${this.#mapZoom}/${pos.x}/${pos.y}`,
-            pos,
-          ]);
-        }
-      }
-    }
+  /**
+   * @param {Rectangle} rectangle
+   * @param {number} viewportHeight
+   * @return {Generator<[Rectangle, HTMLImageElement | null]>}
+   */
+  *#targetTiles(rectangle, viewportHeight) {
+    const count = viewportHeight / this.#sessionTileSize.y;
+    const zoom = Math.ceil(Math.log2(1 / (rectangle.size.y / count)));
+    const size = 1 / Math.pow(2, zoom);
+    rectangle.position.scale(1 / size).floor();
+    const newPos = rectangle.position.scale(1 / size).floor();
+    const offset = rectangle.position.scale(1 / size).sub(newPos);
+    const grid = new Rectangle(
+      newPos,
+      rectangle.size
+        .scale(1 / size)
+        .add(offset)
+        .ceil(),
+    );
+    yield* grid.points().map((pos) => {
+      const image = this.#getTileSync(pos, zoom);
+      return [new Rectangle(pos.scale(size), new Vec2d(size, size)), image];
+    });
   }
   /**
    *
@@ -76,39 +90,24 @@ class Map {
    * @param {Mouse} mouse
    * @param {Vec2d} pan
    * @param {number} zoom
+   * @param {Vec2d} size
    */
-  render(ctx, mouse, pan, zoom) {
-    const newMapZoom = Math.floor(Math.log2(zoom));
-    // console.log(zoom,newMapZoom)
-    // console.log(pan.scale(1/zoom))
-    const currentTileSize = this.#TILE_SIZE / Math.pow(2, newMapZoom);
-    const newMapPan = pan
-      .scale(1 / zoom)
-      .scale(1 / currentTileSize)
-      .add(new Vec2d(0.5, 0.5))
-      .floor();
-    if (
-      this.#mapPan === null ||
-      this.#mapZoom === null ||
-      !this.#mapPan.equals(newMapPan) ||
-      this.#mapZoom !== newMapZoom
-    ) {
-      this.#mapZoom = newMapZoom;
-      this.#mapPan = newMapPan.scale(-1);
-      this.#updateTiles();
+  render(ctx, mouse, pan, zoom, size) {
+    if (mouse.down) {
+      this.#target = new Rectangle(pan, size).clamp(this.boundingRectangle);
     }
-
-    for (const [key, pos] of this.#tileKeys()) {
-      const image = this.#images[key];
-      ctx.drawImage(
-        image ?? this.#BLANK,
-        ...pos.scale(currentTileSize).tuple,
-        currentTileSize,
-        currentTileSize,
-      );
+    ctx.strokeStyle = "green";
+    for (const [rect, image] of this.#targetTiles(
+      this.#target.div(this.boundingRectangle.size),
+      size.y * zoom,
+    )) {
+      if (image) {
+        ctx.drawImage(image, ...rect.mul(this.boundingRectangle.size).tuple);
+      } else {
+        ctx.fillRect(...rect.mul(this.boundingRectangle.size).tuple);
+      }
     }
   }
-  boundingRectangle = new Rectangle(new Vec2d(0, 0), new Vec2d(500, 500));
 }
 
 const sessionString = localStorage.getItem("session");
@@ -134,15 +133,3 @@ if (!session) {
 } else {
   view.appendChild(new Map(session));
 }
-// const canvas = document.createElement('canvas');
-
-// canvas.width = 500;
-// canvas.height = 500;
-// canvas.style.border = '10px solid red';
-
-// root.appendChild(canvas);
-
-// const ctx = canvas.getContext('2d');
-// if(!ctx) {
-//     throw new Error('no canvas context!');
-// }

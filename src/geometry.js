@@ -35,10 +35,30 @@ export class Vec2d {
     return new Vec2d(this.x * amount, this.y * amount);
   }
   /**
+   * @param {Vec2d} that
+   * @returns {Vec2d}
+   */
+  mul(that) {
+    return new Vec2d(this.x * that.x, this.y * that.y);
+  }
+  /**
+   * @param {Vec2d} that
+   * @returns {Vec2d}
+   */
+  div(that) {
+    return new Vec2d(this.x / that.x, this.y / that.y);
+  }
+  /**
    * @returns {Vec2d}
    */
   floor() {
     return new Vec2d(Math.floor(this.x), Math.floor(this.y));
+  }
+  /**
+   * @returns {Vec2d}
+   */
+  ceil() {
+    return new Vec2d(Math.ceil(this.x), Math.ceil(this.y));
   }
   /**
    * @param {Vec2d} that
@@ -118,6 +138,20 @@ export class Rectangle {
     );
   }
   /**
+   * @param {Vec2d} that
+   * @returns {Rectangle}
+   */
+  div(that) {
+    return new Rectangle(this.position.div(that), this.size.div(that));
+  }
+  /**
+   * @param {Vec2d} that
+   * @returns {Rectangle}
+   */
+  mul(that) {
+    return new Rectangle(this.position.mul(that), this.size.mul(that));
+  }
+  /**
    * @param {Rectangle} that
    * @returns {Rectangle}
    */
@@ -130,6 +164,13 @@ export class Rectangle {
         .minimums(that.position.add(that.size))
         .sub(max),
     );
+  }
+  *points() {
+    for (let X = this.position.x; X < this.position.x + this.size.x; X++) {
+      for (let Y = this.position.y; Y < this.position.y + this.size.y; Y++) {
+        yield new Vec2d(X, Y);
+      }
+    }
   }
   /**
    * @returns {[number, number, number, number]}

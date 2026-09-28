@@ -131,7 +131,7 @@ export class Mouse extends Vec2d {
  * @typedef {{
  *  readonly controls: ViewControl<any>[],
  *  readonly name: string,
- *  render(ctx: CanvasRenderingContext2D, mouse: Mouse, pan: Vec2d, zoom: number): void,
+ *  render(ctx: CanvasRenderingContext2D, mouse: Mouse, pan: Vec2d, zoom: number, size: Vec2d): void,
  *  readonly boundingRectangle: Rectangle,
  * }} ViewElement
  */
@@ -156,6 +156,8 @@ export class View {
   #mouseDown;
   /** @type {number} */
   #zoom;
+  /** @type {Vec2d} */
+  #size;
 
   /**
    *
@@ -211,16 +213,21 @@ export class View {
         this.#pan.x -= e.shiftKey ? e.deltaY : e.deltaX;
         this.#pan.y -= e.shiftKey ? 0 : e.deltaY;
       }
-      if (this.#zoom < 1) {
-        this.#zoom = 1;
-        return;
-      }
+      this.#size = new Vec2d(
+        this.#ctx.canvas.width / window.devicePixelRatio / this.#zoom,
+        this.#ctx.canvas.height / window.devicePixelRatio / this.#zoom,
+      );
     });
 
     const resizeObserver = new ResizeObserver(() => this.#resize());
     resizeObserver.observe(root);
     this.#resize();
     this.#pan = new Vec2d(0, 0);
+    this.#size = new Vec2d(
+      this.#ctx.canvas.width / window.devicePixelRatio / this.#zoom,
+      this.#ctx.canvas.height / window.devicePixelRatio / this.#zoom,
+    );
+
     requestAnimationFrame(() => this.#render());
   }
   /**
@@ -233,8 +240,12 @@ export class View {
       this.#ctx.canvas.height / window.devicePixelRatio / 2 -
         element.boundingRectangle.size.y / 2,
     );
+
     const container = document.createElement("div");
     this.#children.set(element, container);
+    if (element.controls.length === 0) {
+      return;
+    }
     container.innerHTML = `<div><strong>${element.name}:</strong></div>`;
     element.controls.forEach((control) => {
       const div = document.createElement("div");
@@ -282,8 +293,9 @@ export class View {
             this.#mousePos.sub(this.#pan).scale(1 / this.#zoom),
             () => this.#mouseDown,
           ),
-          this.#pan,
+          this.#pan.scale(-1 / this.#zoom),
           this.#zoom,
+          this.#size,
         );
         this.#ctx.restore();
       });
