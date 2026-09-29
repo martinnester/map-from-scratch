@@ -2,11 +2,6 @@
 import { View } from "./view.js";
 
 import { Rectangle, Vec2d } from "./geometry.js";
-const GOOGLE_MAPS_API_KEY =
-  localStorage.getItem("api-key") ?? prompt("enter google maps api key");
-if (GOOGLE_MAPS_API_KEY) {
-  localStorage.setItem("api-key", GOOGLE_MAPS_API_KEY);
-}
 
 /** @typedef {{session: string, expiry: string, tileWidth: number, imageFormat: "jpeg" | string, tileHeight:number}} TileSession */
 const view = new View(
@@ -30,14 +25,8 @@ class Map {
       offscreenCanvas: new OffscreenCanvas(1, 1),
     };
   boundingRectangle = new Rectangle(new Vec2d(0, 0), new Vec2d(1000, 1000));
-  /** @type {TileSession} */ #session;
-  /** @type {Vec2d}  */ #sessionTileSize;
-  /**
-   * @param {TileSession} session
-   */
-  constructor(session) {
-    this.#session = session;
-    this.#sessionTileSize = new Vec2d(session.tileWidth, session.tileHeight);
+  /** @type {Vec2d}  */ #tileSize = new Vec2d(256, 256);
+  constructor() {
     this.#targetTiles(
       new Rectangle(new Vec2d(0, 0), new Vec2d(1, 1)),
       screen.height * 2,
@@ -56,7 +45,7 @@ class Map {
       );
     } else {
       const image = new Image();
-      image.src = `https://tile.googleapis.com/v1/2dtiles/${key}?session=${this.#session.session}&key=${GOOGLE_MAPS_API_KEY}`;
+      image.src = `https://mt0.google.com/vt/lyrs=s&x=${position.x}&y=${position.y}&z=${zoom}`;
       const promise = new Promise((res) => {
         image.addEventListener("load", () => res(image), { once: true });
         image.addEventListener("error", () => res(null), { once: true });
@@ -71,7 +60,7 @@ class Map {
    * @return {Promise<{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas}>}
    */
   async #targetTiles(rectangle, viewportHeight) {
-    const count = viewportHeight / this.#sessionTileSize.y;
+    const count = viewportHeight / this.#tileSize.y;
     const zoom = Math.ceil(Math.log2(1 / (rectangle.size.y / count)));
     const size = 1 / Math.pow(2, zoom);
     rectangle.position.scale(1 / size).floor();
@@ -85,7 +74,7 @@ class Map {
         .ceil(),
     );
     const offscreenCanvas = new OffscreenCanvas(
-      ...grid.size.mul(this.#sessionTileSize).tuple,
+      ...grid.size.mul(this.#tileSize).tuple,
     );
     const ctx = offscreenCanvas.getContext("2d");
     if (!ctx) {
@@ -95,10 +84,7 @@ class Map {
       grid.points().map(async (pos) => {
         const image = await this.#getTile(pos, zoom);
         if (image) {
-          ctx.drawImage(
-            image,
-            ...pos.sub(newPos).mul(this.#sessionTileSize).tuple,
-          );
+          ctx.drawImage(image, ...pos.sub(newPos).mul(this.#tileSize).tuple);
         }
       }),
     );
@@ -143,27 +129,4 @@ class Map {
     );
   }
 }
-
-const sessionString = localStorage.getItem("session");
-let session = sessionString && JSON.parse(sessionString);
-if (!session) {
-  /**@type {TileSession} */
-  fetch(
-    `https://tile.googleapis.com/v1/createSession?key=${GOOGLE_MAPS_API_KEY}`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        mapType: "satellite",
-        language: "en-US",
-        region: "US",
-      }),
-    },
-  ).then(async (x) => {
-    const res = /** @type {TileSession} */ (await x.json());
-    localStorage.setItem("session", JSON.stringify(res));
-    session = res;
-    console.log(session);
-  });
-} else {
-  view.appendChild(new Map(session));
-}
+view.appendChild(new Map());
