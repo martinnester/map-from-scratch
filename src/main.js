@@ -21,11 +21,15 @@ class Map {
   name = "Map";
   /** @type {Vec2d | null} */ #mapPan = null;
   /** @type {number | null} */ #mapZoom = null;
-  /** @type {Record<string, HTMLImageElement>} */ #imageCache = {};
-  /** @type {OffscreenCanvas} */ #offscreenCanvas = new OffscreenCanvas(1, 1);
-  /** @type {Vec2d} */ #offscreenCanvasPosition = new Vec2d(0, 0);
+  /** @type {Record<string, Promise<HTMLImageElement | null>>} */ #tilePromises =
+    {};
+
+  /**@type {{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas}} */ #ocBase =
+    {
+      rectangle: new Rectangle(new Vec2d(0, 0), new Vec2d(1, 1)),
+      offscreenCanvas: new OffscreenCanvas(1, 1),
+    };
   boundingRectangle = new Rectangle(new Vec2d(0, 0), new Vec2d(1000, 1000));
-  /** @type {Rectangle} */ #target = this.boundingRectangle;
   /** @type {TileSession} */ #session;
   /** @type {Vec2d}  */ #sessionTileSize;
   /**
@@ -34,38 +38,39 @@ class Map {
   constructor(session) {
     this.#session = session;
     this.#sessionTileSize = new Vec2d(session.tileWidth, session.tileHeight);
+    this.#targetTiles(
+      new Rectangle(new Vec2d(0, 0), new Vec2d(1, 1)),
+      screen.height * 2,
+    ).then((res) => (this.#ocBase = res));
   }
   /**
    * @param {Vec2d} position
    * @param {number} zoom
-   * @returns {HTMLImageElement | null}
+   * @returns {Promise<HTMLImageElement | null>}
    */
-  #getTileSync(position, zoom) {
+  #getTile(position, zoom) {
     const key = `${zoom}/${position.x}/${position.y}`;
-    if (key in this.#imageCache) {
-      return this.#imageCache[key] ?? null;
+    if (key in this.#tilePromises) {
+      return /** @type {Promise<HTMLImageElement | null>} */ (
+        this.#tilePromises[key]
+      );
     } else {
       const image = new Image();
       image.src = `https://tile.googleapis.com/v1/2dtiles/${key}?session=${this.#session.session}&key=${GOOGLE_MAPS_API_KEY}`;
-      image.addEventListener(
-        "load",
-        () => {
-          this.#imageCache[key] = image;
-        },
-        { once: true },
-      );
-      image.addEventListener("error", () => {
-        this.#imageCache[key] = image;
+      const promise = new Promise((res) => {
+        image.addEventListener("load", () => res(image), { once: true });
+        image.addEventListener("error", () => res(null), { once: true });
       });
-      return null;
+      this.#tilePromises[key] = promise;
+      return promise;
     }
   }
   /**
    * @param {Rectangle} rectangle
    * @param {number} viewportHeight
-   * @return {Generator<[Rectangle, HTMLImageElement | null]>}
+   * @return {Promise<{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas}>}
    */
-  *#targetTiles(rectangle, viewportHeight) {
+  async #targetTiles(rectangle, viewportHeight) {
     const count = viewportHeight / this.#sessionTileSize.y;
     const zoom = Math.ceil(Math.log2(1 / (rectangle.size.y / count)));
     const size = 1 / Math.pow(2, zoom);
@@ -79,11 +84,32 @@ class Map {
         .add(offset)
         .ceil(),
     );
-    yield* grid.points().map((pos) => {
-      const image = this.#getTileSync(pos, zoom);
-      return [new Rectangle(pos.scale(size), new Vec2d(size, size)), image];
-    });
+    const offscreenCanvas = new OffscreenCanvas(
+      ...grid.size.mul(this.#sessionTileSize).tuple,
+    );
+    const ctx = offscreenCanvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("no canvas2d context");
+    }
+    await Promise.all(
+      grid.points().map(async (pos) => {
+        const image = await this.#getTile(pos, zoom);
+        if (image) {
+          ctx.drawImage(
+            image,
+            ...pos.sub(newPos).mul(this.#sessionTileSize).tuple,
+          );
+        }
+      }),
+    );
+    return { offscreenCanvas, rectangle: grid.scale(size) };
   }
+  /**@type {boolean} */ #loading = false;
+  /**@type {{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas}} */ #oc = {
+    rectangle: new Rectangle(new Vec2d(0, 0), new Vec2d(1, 1)),
+    offscreenCanvas: new OffscreenCanvas(1, 1),
+  };
+  /**@type {string} */ #key = "";
   /**
    *
    * @param {CanvasRenderingContext2D} ctx
@@ -93,20 +119,28 @@ class Map {
    * @param {Vec2d} size
    */
   render(ctx, mouse, pan, zoom, size) {
-    if (mouse.down) {
-      this.#target = new Rectangle(pan, size).clamp(this.boundingRectangle);
+    const rect = new Rectangle(pan, size)
+      .clamp(this.boundingRectangle)
+      .div(this.boundingRectangle.size);
+    const z = size.y * zoom;
+    const key = [...rect.tuple, z].map(String).join("/");
+    if (!this.#loading && key !== this.#key) {
+      this.#key = key;
+      this.#loading = true;
+      this.#targetTiles(rect, z).then((res) => {
+        console.log(res);
+        this.#oc = res;
+        this.#loading = false;
+      });
     }
-    ctx.strokeStyle = "green";
-    for (const [rect, image] of this.#targetTiles(
-      this.#target.div(this.boundingRectangle.size),
-      size.y * zoom,
-    )) {
-      if (image) {
-        ctx.drawImage(image, ...rect.mul(this.boundingRectangle.size).tuple);
-      } else {
-        ctx.fillRect(...rect.mul(this.boundingRectangle.size).tuple);
-      }
-    }
+    ctx.drawImage(
+      this.#ocBase.offscreenCanvas,
+      ...this.#ocBase.rectangle.mul(this.boundingRectangle.size).tuple,
+    );
+    ctx.drawImage(
+      this.#oc.offscreenCanvas,
+      ...this.#oc.rectangle.mul(this.boundingRectangle.size).tuple,
+    );
   }
 }
 

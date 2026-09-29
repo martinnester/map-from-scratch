@@ -152,6 +152,13 @@ export class Rectangle {
     return new Rectangle(this.position.mul(that), this.size.mul(that));
   }
   /**
+   * @param {number} amount
+   * @returns {Rectangle}
+   */
+  scale(amount) {
+    return new Rectangle(this.position.scale(amount), this.size.scale(amount));
+  }
+  /**
    * @param {Rectangle} that
    * @returns {Rectangle}
    */
