@@ -105,10 +105,9 @@ class Map {
    * @param {Vec2d} size
    */
   render(ctx, mouse, pan, zoom, size) {
-    const rect = new Rectangle(pan, size)
-      .clamp(this.boundingRectangle)
-      .div(this.boundingRectangle.size);
-    const z = size.y * zoom;
+    const bounds = new Rectangle(pan, size).clamp(this.boundingRectangle);
+    const rect = bounds.div(this.boundingRectangle.size);
+    const z = bounds.size.y * zoom;
     const key = [...rect.tuple, z].map(String).join("/");
     if (!this.#loading && key !== this.#key) {
       this.#key = key;
