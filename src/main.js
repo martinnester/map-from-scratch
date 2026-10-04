@@ -1,7 +1,7 @@
 /** @import {ViewElement, ViewControl, Mouse} from "./view.js" */
-import { View } from "./view.js";
+import { View, ViewIntControl } from "./view.js";
 
-import { Rectangle, Vec2d } from "./geometry.js";
+import { Matrix, Rectangle, Vec2d } from "./geometry.js";
 
 /** @typedef {{session: string, expiry: string, tileWidth: number, imageFormat: "jpeg" | string, tileHeight:number}} TileSession */
 const view = new View(
@@ -12,6 +12,7 @@ const view = new View(
  * @implements {ViewElement}
  */
 class Map {
+  #angle = new ViewIntControl("angle", 0, 0, 360);
   controls = /** @type {ViewControl<any>[]} */ ([]);
   name = "Map";
   /** @type {Vec2d | null} */ #mapPan = null;
@@ -30,7 +31,11 @@ class Map {
     this.#targetTiles(
       new Rectangle(new Vec2d(0, 0), new Vec2d(1, 1)),
       screen.height * 2,
-    ).then((res) => (this.#ocBase = res));
+    ).then((res) => {
+      if (res) {
+        this.#ocBase = res;
+      }
+    });
   }
   /**
    * @param {Vec2d} position
@@ -54,10 +59,11 @@ class Map {
       return promise;
     }
   }
+  #targetTilesKey = "";
   /**
    * @param {Rectangle} rectangle
    * @param {number} viewportHeight
-   * @return {Promise<{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas}>}
+   * @return {Promise<{rectangle: Rectangle, offscreenCanvas: OffscreenCanvas} | null>}
    */
   async #targetTiles(rectangle, viewportHeight) {
     const count = viewportHeight / this.#tileSize.y;
@@ -73,6 +79,11 @@ class Map {
         .add(offset)
         .ceil(),
     );
+    const key = grid.tuple.map(String).join("/");
+    if (this.#targetTilesKey === key) {
+      return Promise.resolve(null);
+    }
+    this.#targetTilesKey = key;
     const offscreenCanvas = new OffscreenCanvas(
       ...grid.size.mul(this.#tileSize).tuple,
     );
@@ -100,24 +111,23 @@ class Map {
    *
    * @param {CanvasRenderingContext2D} ctx
    * @param {Mouse} mouse
-   * @param {Vec2d} pan
-   * @param {number} zoom
+   * @param {Matrix} transform
    * @param {Vec2d} size
    */
-  render(ctx, mouse, pan, zoom, size) {
-    const bounds = new Rectangle(pan, size).clamp(this.boundingRectangle);
-    const rect = bounds.div(this.boundingRectangle.size);
-    const z = bounds.size.y * zoom;
-    const key = [...rect.tuple, z].map(String).join("/");
-    if (!this.#loading && key !== this.#key) {
-      this.#key = key;
-      this.#loading = true;
-      this.#targetTiles(rect, z).then((res) => {
-        console.log(res);
-        this.#oc = res;
-        this.#loading = false;
-      });
-    }
+  render(ctx, mouse, transform, size) {
+    // const bounds = new Rectangle(pan, size).clamp(this.boundingRectangle);
+    // const rect = bounds.div(this.boundingRectangle.size);
+    // const z = bounds.size.y * zoom;
+    // if (!this.#loading) {
+    //   this.#loading = true;
+    //   this.#targetTiles(rect, z).then((res) => {
+    //     if(res) {
+    //       this.#oc = res;
+    //     }
+    //             this.#loading = false;
+
+    //   });
+    // }
     ctx.drawImage(
       this.#ocBase.offscreenCanvas,
       ...this.#ocBase.rectangle.mul(this.boundingRectangle.size).tuple,

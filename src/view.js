@@ -1,4 +1,4 @@
-import { Rectangle, Vec2d } from "./geometry.js";
+import { Matrix, Rectangle, Vec2d } from "./geometry.js";
 
 /**
  * @template T
@@ -131,7 +131,7 @@ export class Mouse extends Vec2d {
  * @typedef {{
  *  readonly controls: ViewControl<any>[],
  *  readonly name: string,
- *  render(ctx: CanvasRenderingContext2D, mouse: Mouse, pan: Vec2d, zoom: number, size: Vec2d): void,
+ *  render(ctx: CanvasRenderingContext2D, mouse: Mouse, transform: Matrix, size: Vec2d): void,
  *  readonly boundingRectangle: Rectangle,
  * }} ViewElement
  */
@@ -149,15 +149,17 @@ export class View {
   /** @type {Map<ViewElement,HTMLDivElement>} */
   #children;
   /** @type {Vec2d} */
-  #pan;
-  /** @type {Vec2d} */
   #mousePos;
   /** @type {boolean} */
   #mouseDown;
-  /** @type {number} */
-  #zoom;
   /** @type {Vec2d} */
   #size;
+  /** @type {Matrix} */
+  #transform = Matrix.indentity()
+    .multM(Matrix.rotation(Math.PI * 1.7))
+    .multM(Matrix.scale(2));
+  /** @type {PointerEvent[]} */
+  #pointerMoveEvents = [];
 
   /**
    *
@@ -170,6 +172,28 @@ export class View {
       throw new Error("CanvasRenderingContext2D not available");
     }
     this.#ctx = ctx;
+
+    window.addEventListener("pointermove", (e) => {
+      this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
+    });
+
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+    });
+    const pointersDown = /**@type {Set<number>} */ (new Set());
+    canvas.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      pointersDown.add(e.pointerId);
+    });
+    window.addEventListener("pointermove", (e) => {
+      if (pointersDown.has(e.pointerId)) {
+        this.#pointerMoveEvents.push(e);
+        this.#pointerMoveEvents.sort((a, b) => a.pointerId - b.pointerId);
+      }
+    });
+    window.addEventListener("pointerup", (e) => {
+      pointersDown.delete(e.pointerId);
+    });
 
     this.#root = root;
     canvas.style.width = "100%";
@@ -184,63 +208,40 @@ export class View {
     this.#controlsRoot.style.top = "0";
     this.#root.appendChild(this.#controlsRoot);
 
-    this.#zoom = 1;
     this.#mouseDown = false;
     this.#mousePos = new Vec2d(0, 0);
-    this.#root.addEventListener("mousemove", (e) => {
-      const { x, y } = root.getBoundingClientRect();
-      this.#mousePos.x = e.x - x;
-      this.#mousePos.y = e.y - y;
-    });
-    canvas.addEventListener("mousedown", () => {
-      this.#mouseDown = true;
-    });
-    canvas.addEventListener("mouseup", () => {
-      this.#mouseDown = false;
-    });
     this.#root.addEventListener("wheel", (e) => {
       e.preventDefault();
-      const { x, y } = root.getBoundingClientRect();
-      this.#mousePos.x = e.x - x;
-      this.#mousePos.y = e.y - y;
-
-      if (e.ctrlKey || e.metaKey) {
-        const scalar = 1.001 ** -e.deltaY;
-        this.#zoom *= scalar;
-        this.#pan.x -= (scalar - 1) * (this.#mousePos.x - this.#pan.x);
-        this.#pan.y -= (scalar - 1) * (this.#mousePos.y - this.#pan.y);
-      } else {
-        this.#pan.x -= e.shiftKey ? e.deltaY : e.deltaX;
-        this.#pan.y -= e.shiftKey ? 0 : e.deltaY;
-      }
-      this.#size = new Vec2d(
-        this.#ctx.canvas.width / window.devicePixelRatio / this.#zoom,
-        this.#ctx.canvas.height / window.devicePixelRatio / this.#zoom,
-      );
+      const scalar = 1.001 ** -e.deltaY;
+      this.#transform = this.#transform
+        .multM(Matrix.translation(this.#mousePos))
+        .multM(Matrix.scale(scalar))
+        .multM(Matrix.translation(this.#mousePos.scale(-1)));
+      console.log(...this.#transform.tuple);
     });
 
     const resizeObserver = new ResizeObserver(() => this.#resize());
     resizeObserver.observe(root);
     this.#resize();
-    this.#pan = new Vec2d(0, 0);
     this.#size = new Vec2d(
-      this.#ctx.canvas.width / window.devicePixelRatio / this.#zoom,
-      this.#ctx.canvas.height / window.devicePixelRatio / this.#zoom,
+      this.#ctx.canvas.width / window.devicePixelRatio, // / this.#zoom,
+      this.#ctx.canvas.height / window.devicePixelRatio, // / this.#zoom,
     );
 
     requestAnimationFrame(() => this.#render());
   }
   /**
+   * @param {Vec2d} screen
+   * @returns {Vec2d}
+   */
+  #screenToWorld(screen) {
+    const { x, y } = this.#root.getBoundingClientRect();
+    return this.#transform.inverse().multV(screen.sub(new Vec2d(x, y, 0)));
+  }
+  /**
    * @param {ViewElement} element
    */
   appendChild(element) {
-    this.#pan = new Vec2d(
-      this.#ctx.canvas.width / window.devicePixelRatio / 2 -
-        element.boundingRectangle.size.x / 2,
-      this.#ctx.canvas.height / window.devicePixelRatio / 2 -
-        element.boundingRectangle.size.y / 2,
-    );
-
     const container = document.createElement("div");
     this.#children.set(element, container);
     if (element.controls.length === 0) {
@@ -278,11 +279,46 @@ export class View {
   }
 
   #render() {
+    if (this.#pointerMoveEvents) {
+      const [first, second] = this.#pointerMoveEvents;
+      if (first) {
+        this.#transform = this.#transform.multM(
+          Matrix.translation(
+            this.#transform
+              .inverse()
+              .multV(new Vec2d(first.movementX, first.movementY, 0)),
+          ),
+        );
+      }
+      if (first && second) {
+        // TODO: make this actually work well
+        const firstPosWorld = this.#screenToWorld(new Vec2d(first.x, first.y));
+        const secondPosScreen = new Vec2d(second.x, second.y);
+        const a = this.#screenToWorld(
+          secondPosScreen.sub(new Vec2d(second.movementX, second.movementY)),
+        )
+          .sub(firstPosWorld)
+          .angle();
+        const b = this.#screenToWorld(secondPosScreen)
+          .sub(firstPosWorld)
+          .angle();
+        this.#transform = this.#transform
+          .multM(Matrix.translation(firstPosWorld))
+          .multM(Matrix.rotation(b - a))
+          .multM(Matrix.translation(firstPosWorld.scale(-1)));
+      }
+      this.#pointerMoveEvents = [];
+    }
     this.#ctx.clearRect(0, 0, this.#ctx.canvas.width, this.#ctx.canvas.height);
     this.#ctx.save();
-    this.#ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    this.#ctx.translate(this.#pan.x, this.#pan.y);
-    this.#ctx.scale(this.#zoom, this.#zoom);
+    const matrix = Matrix.scale(window.devicePixelRatio).multM(
+      this.#transform,
+    ).tuple;
+    if (!matrix.every(Number.isFinite)) {
+      debugger;
+    } else {
+      this.#ctx.setTransform(...matrix);
+    }
 
     if (this.#children) {
       this.#children.forEach((_, child) => {
@@ -290,16 +326,21 @@ export class View {
         child.render(
           this.#ctx,
           new Mouse(
-            this.#mousePos.sub(this.#pan).scale(1 / this.#zoom),
+            // this.#mousePos.sub(this.#pan).scale(1 / this.#zoom),
+            this.#mousePos,
             () => this.#mouseDown,
           ),
-          this.#pan.scale(-1 / this.#zoom),
-          this.#zoom,
+          this.#transform,
           this.#size,
         );
         this.#ctx.restore();
       });
     }
+    this.#ctx.beginPath();
+    this.#ctx.arc(...this.#mousePos.tuple, 5, 0, 2 * Math.PI);
+    this.#ctx.closePath();
+    this.#ctx.fill();
+
     this.#ctx.restore();
     requestAnimationFrame(() => this.#render());
   }
