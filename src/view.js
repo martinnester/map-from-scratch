@@ -155,11 +155,24 @@ export class View {
   /** @type {Vec2d} */
   #size;
   /** @type {Matrix} */
-  #transform = Matrix.indentity()
-    .multM(Matrix.rotation(Math.PI * 1.7))
-    .multM(Matrix.scale(2));
+  #transform = Matrix.indentity().multM(Matrix.scale(2));
   /** @type {PointerEvent[]} */
   #pointerMoveEvents = [];
+
+  // #a = {
+  //   start: new Vec2d(0, 0),
+  //   end: new Vec2d(50, 50),
+  // };
+  // #b = {
+  //   start: new Vec2d(100, 100),
+  //   end: new Vec2d(150, 150),
+  // };
+  // #testPoints = {
+  //   "a-start": this.#a.start,
+  //   "a-end": this.#a.end,
+  //   "b-start": this.#b.start,
+  //   "b-end": this.#b.end,
+  // };
 
   /**
    *
@@ -172,6 +185,19 @@ export class View {
       throw new Error("CanvasRenderingContext2D not available");
     }
     this.#ctx = ctx;
+
+    // root.addEventListener("mousedown", (e) => {
+    //   this.#mouseDown = true;
+    //   this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
+    // });
+
+    // root.addEventListener("mousemove", (e) => {
+    //   this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
+    // });
+
+    // window.addEventListener("mouseup", (e) => {
+    //   this.#mouseDown = false;
+    // });
 
     window.addEventListener("pointermove", (e) => {
       this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
@@ -187,6 +213,9 @@ export class View {
     });
     window.addEventListener("pointermove", (e) => {
       if (pointersDown.has(e.pointerId)) {
+        this.#pointerMoveEvents = this.#pointerMoveEvents.filter(
+          (x) => x.pointerId !== e.pointerId,
+        );
         this.#pointerMoveEvents.push(e);
         this.#pointerMoveEvents.sort((a, b) => a.pointerId - b.pointerId);
       }
@@ -217,7 +246,6 @@ export class View {
         .multM(Matrix.translation(this.#mousePos))
         .multM(Matrix.scale(scalar))
         .multM(Matrix.translation(this.#mousePos.scale(-1)));
-      console.log(...this.#transform.tuple);
     });
 
     const resizeObserver = new ResizeObserver(() => this.#resize());
@@ -278,6 +306,42 @@ export class View {
     this.#ctx.canvas.height = this.#root.clientHeight * window.devicePixelRatio;
   }
 
+  /**
+   *
+   * @param {Vec2d} aStart
+   * @param {Vec2d} bStart
+   * @param {Vec2d} aEnd
+   * @param {Vec2d} bEnd
+   * @returns {Matrix}
+   */
+  #pinchTransform(aStart, bStart, aEnd, bEnd) {
+    const aEndToBEnd = bEnd.sub(aEnd);
+    const aStartToBStart = bStart.sub(aStart);
+
+    let angle = aEndToBEnd.angle() - aStartToBStart.angle();
+
+    /** @type {(offset: number)=>Matrix} */
+    const getT = (offset) =>
+      Matrix.translation(aEnd)
+        .multM(
+          Matrix.scale(aEndToBEnd.magnitude() / aStartToBStart.magnitude()),
+        )
+        .multM(
+          Matrix.rotation(angle + offset).multM(
+            Matrix.translation(aEnd.sub(aStart)).multM(
+              Matrix.translation(aEnd.scale(-1)),
+            ),
+          ),
+        );
+
+    let T = getT(0);
+
+    if (T.multV(bStart).sub(bEnd).magnitude() > 0.00001) {
+      T = getT(Math.PI);
+    }
+    return T;
+  }
+
   #render() {
     if (this.#pointerMoveEvents) {
       const [first, second] = this.#pointerMoveEvents;
@@ -291,21 +355,25 @@ export class View {
         );
       }
       if (first && second) {
-        // TODO: make this actually work well
-        const firstPosWorld = this.#screenToWorld(new Vec2d(first.x, first.y));
-        const secondPosScreen = new Vec2d(second.x, second.y);
-        const a = this.#screenToWorld(
-          secondPosScreen.sub(new Vec2d(second.movementX, second.movementY)),
-        )
-          .sub(firstPosWorld)
-          .angle();
-        const b = this.#screenToWorld(secondPosScreen)
-          .sub(firstPosWorld)
-          .angle();
-        this.#transform = this.#transform
-          .multM(Matrix.translation(firstPosWorld))
-          .multM(Matrix.rotation(b - a))
-          .multM(Matrix.translation(firstPosWorld.scale(-1)));
+        const aStart = new Vec2d(
+          first.x - first.movementX,
+          first.y - first.movementY,
+        );
+        const bStart = new Vec2d(
+          second.x - second.movementX,
+          second.y - second.movementY,
+        );
+        const aEnd = new Vec2d(first.x, first.y);
+        const bEnd = new Vec2d(second.x, second.y);
+
+        this.#transform = this.#transform.multM(
+          this.#pinchTransform(
+            this.#screenToWorld(aStart),
+            this.#screenToWorld(bStart),
+            this.#screenToWorld(aEnd),
+            this.#screenToWorld(bEnd),
+          ),
+        );
       }
       this.#pointerMoveEvents = [];
     }
@@ -336,12 +404,70 @@ export class View {
         this.#ctx.restore();
       });
     }
-    this.#ctx.beginPath();
-    this.#ctx.arc(...this.#mousePos.tuple, 5, 0, 2 * Math.PI);
-    this.#ctx.closePath();
-    this.#ctx.fill();
 
-    this.#ctx.restore();
+    // for (const [name, point] of Object.entries(this.#testPoints)) {
+    //   if (this.#mouseDown && point.sub(this.#mousePos).magnitude() < 10) {
+    //     point.x = this.#mousePos.x;
+    //     point.y = this.#mousePos.y;
+    //     break;
+    //   }
+    // }
+    // for (const [name, point] of Object.entries(this.#testPoints)) {
+    //   this.#ctx.beginPath();
+    //   this.#ctx.fillText(name, ...point.sub(new Vec2d(-5, 5)).tuple);
+    //   this.#ctx.arc(...point.tuple, 4, 0, Math.PI * 2);
+    //   this.#ctx.closePath();
+    //   this.#ctx.fill();
+    // }
+
+    // this.#ctx.beginPath();
+    // this.#ctx.moveTo(...this.#a.start.tuple);
+    // this.#ctx.lineTo(...this.#b.start.tuple);
+    // this.#ctx.closePath();
+    // this.#ctx.stroke();
+
+    // this.#ctx.beginPath();
+    // this.#ctx.moveTo(...this.#a.end.tuple);
+    // this.#ctx.lineTo(...this.#b.end.tuple);
+    // this.#ctx.closePath();
+    // this.#ctx.stroke();
+
+    // this.#ctx.fillStyle = "blue";
+    // this.#ctx.strokeStyle = "blue";
+    // this.#ctx.beginPath();
+    // const T = this.#pinchTransform(this.#a.start,this.#b.start,this.#a.end,this.#b.end);
+    // this.#ctx.moveTo(...T.multV(this.#a.start).tuple);
+    // this.#ctx.lineTo(...T.multV(this.#b.start).tuple);
+    // this.#ctx.closePath();
+    // this.#ctx.stroke();
+
+    // this.#ctx.fillStyle = this.#mouseDown ? "red" : "blue";
+    // this.#ctx.beginPath();
+    // this.#ctx.arc(...this.#mousePos.tuple, 2, 0, Math.PI * 2);
+    // this.#ctx.closePath();
+    // this.#ctx.fill();
+    // this.#ctx.fillStyle = "black";
+    // this.#ctx.restore();
+
+    // this.#ctx.save();
+    // this.#ctx.scale(100, 100);
+    // this.#ctx.translate(2, 2);
+    // this.#ctx.beginPath();
+    // this.#ctx.strokeStyle = "blue";
+    // this.#ctx.moveTo(0, 0);
+    // this.#ctx.lineWidth = 0.1;
+    // this.#ctx.lineTo(...this.#transform.iHat.tuple);
+    // this.#ctx.stroke();
+    // this.#ctx.closePath();
+    // this.#ctx.beginPath();
+    // this.#ctx.strokeStyle = "red";
+    // this.#ctx.moveTo(0, 0);
+    // this.#ctx.lineWidth = 0.1;
+
+    // this.#ctx.lineTo(...this.#transform.jHat.tuple);
+    // this.#ctx.stroke();
+    // this.#ctx.closePath();
+    // this.#ctx.restore();
     requestAnimationFrame(() => this.#render());
   }
 }

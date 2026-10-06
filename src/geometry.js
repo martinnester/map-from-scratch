@@ -8,9 +8,9 @@ function mod(n, d) {
 }
 
 export class Matrix {
-  /**@readonly @type {Vec2d} */ #iHat; // where to project x value
-  /**@readonly @type {Vec2d} */ #jHat; // where to project y value
-  /**@readonly @type {Vec2d} */ #translation;
+  /**@readonly @type {Vec2d} */ iHat; // where to project x value
+  /**@readonly @type {Vec2d} */ jHat; // where to project y value
+  /**@readonly @type {Vec2d} */ translation;
 
   /**
    * @param {Vec2d} iHat
@@ -18,9 +18,9 @@ export class Matrix {
    * @param {Vec2d} [translation]
    */
   constructor(iHat, jHat, translation = new Vec2d(0, 0)) {
-    this.#iHat = iHat;
-    this.#jHat = jHat;
-    this.#translation = translation;
+    this.iHat = iHat;
+    this.jHat = jHat;
+    this.translation = translation;
   }
 
   /**
@@ -30,10 +30,10 @@ export class Matrix {
    * @returns {Vec2d}
    */
   multV(that, w) {
-    const res = this.#iHat
+    const res = this.iHat
       .scale(that.x)
-      .add(this.#jHat.scale(that.y))
-      .add(this.#translation.scale(that.w));
+      .add(this.jHat.scale(that.y))
+      .add(this.translation.scale(that.w));
     if (w !== undefined) {
       res.w = w;
     }
@@ -47,9 +47,9 @@ export class Matrix {
    */
   multM(that) {
     return new Matrix(
-      this.multV(that.#iHat, 0),
-      this.multV(that.#jHat, 0),
-      this.multV(that.#translation),
+      this.multV(that.iHat, 0),
+      this.multV(that.jHat, 0),
+      this.multV(that.translation),
     );
   }
 
@@ -58,12 +58,12 @@ export class Matrix {
    */
   get tuple() {
     return [
-      this.#iHat.x,
-      this.#iHat.y,
-      this.#jHat.x,
-      this.#jHat.y,
-      this.#translation.x,
-      this.#translation.y,
+      this.iHat.x,
+      this.iHat.y,
+      this.jHat.x,
+      this.jHat.y,
+      this.translation.x,
+      this.translation.y,
     ];
   }
 
@@ -104,12 +104,12 @@ export class Matrix {
    * @throws {Error} If the matrix is singular (determinant is 0).
    */
   inverse() {
-    const ix = this.#iHat.x,
-      iy = this.#iHat.y;
-    const jx = this.#jHat.x,
-      jy = this.#jHat.y;
-    const tx = this.#translation.x,
-      ty = this.#translation.y;
+    const ix = this.iHat.x,
+      iy = this.iHat.y;
+    const jx = this.jHat.x,
+      jy = this.jHat.y;
+    const tx = this.translation.x,
+      ty = this.translation.y;
 
     // Calculate determinant of the 2x2 linear component
     const det = ix * jy - iy * jx;
@@ -252,6 +252,9 @@ export class Vec2d {
     return Math.atan(this.y / this.x);
   }
 }
+Object.assign(window, {
+  Vec2d,
+});
 
 export class Rectangle {
   /** @readonly @type {Vec2d} */ position;
