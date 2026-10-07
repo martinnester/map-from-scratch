@@ -156,23 +156,8 @@ export class View {
   #size;
   /** @type {Matrix} */
   #transform = Matrix.indentity().multM(Matrix.scale(2));
-  /** @type {PointerEvent[]} */
+  /** @type {{start: Vec2d, end?: Vec2d}[]} */
   #pointerMoveEvents = [];
-
-  // #a = {
-  //   start: new Vec2d(0, 0),
-  //   end: new Vec2d(50, 50),
-  // };
-  // #b = {
-  //   start: new Vec2d(100, 100),
-  //   end: new Vec2d(150, 150),
-  // };
-  // #testPoints = {
-  //   "a-start": this.#a.start,
-  //   "a-end": this.#a.end,
-  //   "b-start": this.#b.start,
-  //   "b-end": this.#b.end,
-  // };
 
   /**
    *
@@ -186,19 +171,6 @@ export class View {
     }
     this.#ctx = ctx;
 
-    // root.addEventListener("mousedown", (e) => {
-    //   this.#mouseDown = true;
-    //   this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
-    // });
-
-    // root.addEventListener("mousemove", (e) => {
-    //   this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
-    // });
-
-    // window.addEventListener("mouseup", (e) => {
-    //   this.#mouseDown = false;
-    // });
-
     window.addEventListener("pointermove", (e) => {
       this.#mousePos = this.#screenToWorld(new Vec2d(e.x, e.y));
     });
@@ -206,22 +178,18 @@ export class View {
     canvas.addEventListener("touchstart", (e) => {
       e.preventDefault();
     });
-    const pointersDown = /**@type {Set<number>} */ (new Set());
     canvas.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      pointersDown.add(e.pointerId);
+      this.#pointerMoveEvents[e.pointerId] = { start: new Vec2d(e.x, e.y) };
     });
     window.addEventListener("pointermove", (e) => {
-      if (pointersDown.has(e.pointerId)) {
-        this.#pointerMoveEvents = this.#pointerMoveEvents.filter(
-          (x) => x.pointerId !== e.pointerId,
-        );
-        this.#pointerMoveEvents.push(e);
-        this.#pointerMoveEvents.sort((a, b) => a.pointerId - b.pointerId);
+      const entry = this.#pointerMoveEvents[e.pointerId];
+      if (entry) {
+        entry.end = new Vec2d(e.x, e.y);
       }
     });
     window.addEventListener("pointerup", (e) => {
-      pointersDown.delete(e.pointerId);
+      delete this.#pointerMoveEvents[e.pointerId];
     });
 
     this.#root = root;
@@ -343,39 +311,27 @@ export class View {
   }
 
   #render() {
-    if (this.#pointerMoveEvents) {
-      const [first, second] = this.#pointerMoveEvents;
-      if (first) {
-        this.#transform = this.#transform.multM(
-          Matrix.translation(
-            this.#transform
-              .inverse()
-              .multV(new Vec2d(first.movementX, first.movementY, 0)),
-          ),
-        );
-      }
-      if (first && second) {
-        const aStart = new Vec2d(
-          first.x - first.movementX,
-          first.y - first.movementY,
-        );
-        const bStart = new Vec2d(
-          second.x - second.movementX,
-          second.y - second.movementY,
-        );
-        const aEnd = new Vec2d(first.x, first.y);
-        const bEnd = new Vec2d(second.x, second.y);
-
-        this.#transform = this.#transform.multM(
-          this.#pinchTransform(
-            this.#screenToWorld(aStart),
-            this.#screenToWorld(bStart),
-            this.#screenToWorld(aEnd),
-            this.#screenToWorld(bEnd),
-          ),
-        );
-      }
-      this.#pointerMoveEvents = [];
+    const [a, b] = this.#pointerMoveEvents.filter((x) => !!x);
+    if (a?.end && !b) {
+      this.#transform = this.#transform.multM(
+        Matrix.translation(this.#screenToWorld(a.end.sub(a.start))),
+      );
+      a.start = a.end;
+      a.end = undefined;
+    }
+    if (a?.end && b?.end) {
+      this.#transform = this.#transform.multM(
+        this.#pinchTransform(
+          this.#screenToWorld(a.start),
+          this.#screenToWorld(b.start),
+          this.#screenToWorld(a.end),
+          this.#screenToWorld(b.end),
+        ),
+      );
+      a.start = a.end;
+      a.end = undefined;
+      b.start = b.end;
+      b.end = undefined;
     }
     this.#ctx.clearRect(0, 0, this.#ctx.canvas.width, this.#ctx.canvas.height);
     this.#ctx.save();
@@ -404,70 +360,6 @@ export class View {
         this.#ctx.restore();
       });
     }
-
-    // for (const [name, point] of Object.entries(this.#testPoints)) {
-    //   if (this.#mouseDown && point.sub(this.#mousePos).magnitude() < 10) {
-    //     point.x = this.#mousePos.x;
-    //     point.y = this.#mousePos.y;
-    //     break;
-    //   }
-    // }
-    // for (const [name, point] of Object.entries(this.#testPoints)) {
-    //   this.#ctx.beginPath();
-    //   this.#ctx.fillText(name, ...point.sub(new Vec2d(-5, 5)).tuple);
-    //   this.#ctx.arc(...point.tuple, 4, 0, Math.PI * 2);
-    //   this.#ctx.closePath();
-    //   this.#ctx.fill();
-    // }
-
-    // this.#ctx.beginPath();
-    // this.#ctx.moveTo(...this.#a.start.tuple);
-    // this.#ctx.lineTo(...this.#b.start.tuple);
-    // this.#ctx.closePath();
-    // this.#ctx.stroke();
-
-    // this.#ctx.beginPath();
-    // this.#ctx.moveTo(...this.#a.end.tuple);
-    // this.#ctx.lineTo(...this.#b.end.tuple);
-    // this.#ctx.closePath();
-    // this.#ctx.stroke();
-
-    // this.#ctx.fillStyle = "blue";
-    // this.#ctx.strokeStyle = "blue";
-    // this.#ctx.beginPath();
-    // const T = this.#pinchTransform(this.#a.start,this.#b.start,this.#a.end,this.#b.end);
-    // this.#ctx.moveTo(...T.multV(this.#a.start).tuple);
-    // this.#ctx.lineTo(...T.multV(this.#b.start).tuple);
-    // this.#ctx.closePath();
-    // this.#ctx.stroke();
-
-    // this.#ctx.fillStyle = this.#mouseDown ? "red" : "blue";
-    // this.#ctx.beginPath();
-    // this.#ctx.arc(...this.#mousePos.tuple, 2, 0, Math.PI * 2);
-    // this.#ctx.closePath();
-    // this.#ctx.fill();
-    // this.#ctx.fillStyle = "black";
-    // this.#ctx.restore();
-
-    // this.#ctx.save();
-    // this.#ctx.scale(100, 100);
-    // this.#ctx.translate(2, 2);
-    // this.#ctx.beginPath();
-    // this.#ctx.strokeStyle = "blue";
-    // this.#ctx.moveTo(0, 0);
-    // this.#ctx.lineWidth = 0.1;
-    // this.#ctx.lineTo(...this.#transform.iHat.tuple);
-    // this.#ctx.stroke();
-    // this.#ctx.closePath();
-    // this.#ctx.beginPath();
-    // this.#ctx.strokeStyle = "red";
-    // this.#ctx.moveTo(0, 0);
-    // this.#ctx.lineWidth = 0.1;
-
-    // this.#ctx.lineTo(...this.#transform.jHat.tuple);
-    // this.#ctx.stroke();
-    // this.#ctx.closePath();
-    // this.#ctx.restore();
     requestAnimationFrame(() => this.#render());
   }
 }
